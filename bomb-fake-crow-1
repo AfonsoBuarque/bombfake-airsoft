@@ -1,0 +1,2100 @@
+//Gestion des entrées//////////////////
+const int btrouge = A3;    //Broche du bouton rouge
+const int btvert = A2;     //Broche du bouton vert
+const int cptmercure = A1; //Broche capteur mercure
+int Fildesamorcage = A0;   //Broche fils desamorcages
+///////////////////////////////////////
+
+//Gestion des sorties//////////////////
+const int bipper = 12;     //Broche du bipper
+const int ledrouge = 11;   //Broche Led rouge
+const int relayalarme = 10;//Broche Relay alarme
+///////////////////////////////////////
+
+//Gestion Keypad///////////////////////
+#include <Keypad.h>
+const int ROW_NUM = 4; //four rows
+const int COLUMN_NUM = 4; //four columns
+char keys[ROW_NUM][COLUMN_NUM] = {
+  {'1','2','3', 'H'},
+  {'4','5','6', 'B'},
+  {'7','8','9', 'G'},
+  {'*','0','#', 'D'}
+};
+byte pin_rows[ROW_NUM] = {9, 8, 7, 6}; //connect to the row pinouts of the keypad
+byte pin_column[COLUMN_NUM] = {5, 4, 3, 2}; //connect to the column pinouts of the keypad
+Keypad keypad = Keypad( makeKeymap(keys), pin_rows, pin_column, ROW_NUM, COLUMN_NUM );
+///////////////////////////////////////
+
+//Gestion LCD /////////////////////////
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x27,20,4);  // set the LCD address to 0x27 for a 16 chars and 2 line display
+byte tiretdroite[8] = {B00001,B00001,B00001,B00001,B00001,B00001,B00001,B00001};
+byte tiretgauche[8] = {B10000,B10000,B10000,B10000,B10000,B10000,B10000,B10000};
+byte barrepleinechargement[8] = {B11111,B00000,B11111,B11111,B11111,B11111,B00000,B11111};
+byte barrevidechargement[8] = {B11111,B00000,B00000,B00000,B00000,B00000,B00000,B11111};
+byte fleche[] = {B00000,B00100,B00010,B11111,B00010,B00100,B00000,B00000};
+///////////////////////////////////////
+
+//Variables programmes ////////////////
+
+//Variable gestion entrées
+boolean EtatboutonVert;
+boolean EtatboutonRouge;
+boolean EtatcptMercure;
+int ValeurRfilsdesamorcage[4] = {512, 343, 259, 208}; //Valeur de résistance par fils retirer
+int EtatFilcouper;
+
+//
+int NavModejeu = 1;  //Navigation mode jeu
+int Nbmodejeu = 3;   //Nombre de jeux programmer
+int Modedejeu = 0;   //Stock le N° du jeu selectionner
+int Animation[4] = {4,0,14,0};
+unsigned long TimerBip[5] = {0, 0, 0, 0, 0};
+
+//Variable gestion du clavier
+char key;
+
+//Variable gestion du temps
+unsigned long currentTime;
+
+//Variable Bt reset
+unsigned long Timereset = 0;
+int ImpulsBtReset = 0; //Stock le nombre impulsion sur bouton reset 
+
+//Variable Mode Explosif
+int NavModeExplosif = 0;  //Navigation dans mode Explosif
+int TpsjeuExplosif [7] = {0, 0, 0, 0, 0, 0, 0}; //Stock la valeur des temps(H,H,M,M,S,S,M)
+int CodeExplosif [8] = {0, 0, 0, 0, 99, 99, 99, 99}; //Stock le code de l'explosif
+int PourcentPenalite [8] = {0, 0, 0, 0, 0, 0, 0, 0}; 
+int NavCodeBombe = 0; 
+int TpsDecrementationBombe;
+int PourcentcumulPenalites = 0;
+int Randomnum;
+int RandomNumSav[2] = {0, 0};
+int RandomNumSavNum = 0;
+
+//Variable Mode Domination
+int NavModeDomination = 0;  //Navigation dans mode Domination
+int TpsjeuDomination[7] = {0, 0, 0, 0, 0, 0, 0}; //Stock la valeur des temps(H,H,M,M,S,S,M)
+unsigned long Timersecpartie = 0;
+boolean Btactif[2] = {0, 0};
+
+//
+int GestionTemps[6] = {0, 0, 0, 0, 0, 0};
+boolean Actifcptmouv = 0;
+unsigned long TimerActifcptmouv;
+unsigned long Tpsscrutation;
+unsigned long Clignotementsaisie;
+///////////////////////////////////////
+
+void setup(){
+  Serial.begin(9600);
+  lcd.init();
+  lcd.backlight();
+  lcd.createChar(2, tiretdroite);
+  lcd.createChar(3, tiretgauche);
+  lcd.createChar(4, barrepleinechargement);
+  lcd.createChar(5, barrevidechargement);
+  lcd.createChar(6, fleche);
+  
+  pinMode(btrouge,INPUT_PULLUP);
+  pinMode(btvert,INPUT_PULLUP);
+  pinMode(cptmercure,INPUT);
+  pinMode(bipper,OUTPUT);
+  pinMode(ledrouge,OUTPUT);
+  pinMode(relayalarme,OUTPUT);
+  intro(); 
+  chargement();
+  lcd.clear();
+
+}
+  
+void loop(){
+  currentTime = millis();
+  int TpsScrutation = currentTime - Tpsscrutation;
+  Serial.print("Tps scrutation ");
+  Serial.print(TpsScrutation);
+  Serial.println(" ms");
+  Tpsscrutation =  millis();
+  key = "99";
+  key = keypad.getKey();
+  btreset(); 
+  if(Modedejeu == 0){
+    selectmodejeu();  
+  }
+  else if(Modedejeu == 1){
+    Domination();
+  }
+  else if(Modedejeu == 2){
+    Explosif();
+  }
+  else{
+    Modedejeu = 0;
+    NavModejeu = 1;
+  }
+}
+
+void selectmodejeu(){
+//SELECTION DU MODE DE JEU ////////////
+  if (key == 'B' && Modedejeu == 0){
+    if(NavModejeu == Nbmodejeu){
+      NavModejeu = 1;
+    }
+    else{
+      NavModejeu++;   
+    }    
+  }
+  else if (key == 'H' && Modedejeu == 0){
+    if(NavModejeu == 1){
+      NavModejeu = Nbmodejeu;
+    }
+    else{
+      NavModejeu--;   
+    }
+  }
+  else if (key == '#' && Modedejeu == 0){
+    Modedejeu = NavModejeu;
+    NavModejeu = 0;
+    key == ' ';  
+  }
+  
+  switch (NavModejeu) {
+    case 0:
+      break;
+    case 1:
+      lcd.setCursor(0, 0);
+      lcd.print("SELECAO DE JOGOS : ");
+      lcd.setCursor(2, 1);
+      lcd.print("Dominacao ");
+      lcd.setCursor(2, 2);
+      lcd.print("Desativacao");
+      lcd.setCursor(2, 3);
+      lcd.print("--------");
+      lcd.setCursor(0, 1);
+      lcd.write(byte(6));
+      lcd.setCursor(0, 2);
+      lcd.print(" ");
+      lcd.setCursor(0, 3);
+      lcd.print(" ");
+      break;
+    case 2:
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+      lcd.setCursor(0, 2);
+      lcd.write(byte(6));
+      lcd.setCursor(0, 3);
+      lcd.print(" ");
+      break;
+    case 3:
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+      lcd.setCursor(0, 2);
+      lcd.print(" ");
+      lcd.setCursor(0, 3);
+      lcd.write(byte(6));
+      break;
+    default:
+      break;
+  }
+///////////////////////////////////////
+}
+
+int saisieclavier(int Saisie){
+//GESTION SAISIE CLAVIER //////////////
+  if (key == '1'){
+    Saisie = 1;      
+  }
+  else if(key == '2'){
+    Saisie = 2;      
+  } 
+  else if(key == '3'){
+    Saisie = 3;      
+  } 
+  else if(key == '4'){
+    Saisie = 4;      
+  } 
+  else if(key == '5'){
+    Saisie = 5;      
+  } 
+  else if(key == '6'){
+    Saisie = 6;      
+  } 
+  else if(key == '7'){
+    Saisie = 7;      
+  } 
+  else if(key == '8'){
+    Saisie = 8;      
+  } 
+  else if(key == '9'){
+    Saisie = 9;      
+  } 
+  else if(key == '0'){
+    Saisie = 0;      
+  } 
+  return(Saisie);   
+///////////////////////////////////////
+}
+
+int flechehaut(){
+//GESTION BOUTON FLECHE HAUT ///////
+  int Saisie = 0;
+  if (key == 'H'){
+    Saisie = 1;      
+  }
+  else{
+    Saisie = 0;   
+  }
+  return Saisie;  
+///////////////////////////////////////    
+}
+
+int flechebas(){
+//GESTION BOUTON FLECHE BAS ///////
+  int Saisie = 0;
+  if (key == 'B'){
+    Saisie = -1;      
+  }
+  else{
+    Saisie = 0;   
+  }
+  return Saisie;  
+///////////////////////////////////////    
+}
+
+int btgauche(){
+//GESTION BOUTON FLECHE GAUCHE ///////
+  int Saisie = 0;
+  if (key == 'G'){
+    Saisie = -1;      
+  }
+  else{
+    Saisie = 0;   
+  }
+  return Saisie;  
+///////////////////////////////////////    
+}
+
+int btdroite(){
+//GESTION BOUTON FLECHE DROITE ///////
+  int Saisie = 0;
+  if (key == 'D'){
+    Saisie = 1;      
+  }
+  else{
+    Saisie = 0;   
+  }
+  return Saisie;  
+///////////////////////////////////////    
+}
+
+int btvalider(){
+//GESTION BOUTON VALIDER /////////////
+  int Saisie = 0;
+  if (key == '#'){
+    Saisie = 1;      
+  }
+  else{
+    Saisie = 0;   
+  }
+  return Saisie;  
+///////////////////////////////////////    
+}
+
+void btreset(){
+//GESTION BOUTON RESET ////////////////
+  if (key == '*' && Timereset == 0){   
+    Timereset = millis();
+    ImpulsBtReset++;
+  }
+  else if (key == '*' && ImpulsBtReset == 3 ){
+    reset();  
+  }
+  else if (key == '*' && Timereset > 0 && currentTime < (Timereset+2000)){
+    ImpulsBtReset++;
+  }
+  else if (Timereset > 0 && currentTime > (Timereset+2000)){
+    ImpulsBtReset = 0;
+    Timereset = 0;
+  } 
+///////////////////////////////////////    
+}
+
+void reset(){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("  - Bombe Reset. -   ");
+  delay(2000);
+  digitalWrite(bipper , HIGH);
+  delay(50);
+  digitalWrite(bipper , LOW);
+  delay(50);
+  digitalWrite(bipper , HIGH);
+  delay(50);
+  digitalWrite(bipper , LOW);
+  digitalWrite(ledrouge , LOW);
+  digitalWrite(relayalarme  , LOW);
+  ImpulsBtReset = 0;
+  Timereset = 0;
+  Timersecpartie = 0;
+  //Variables à remettre à 0 pour le reset
+  NavModejeu = 1;
+  Modedejeu = 0;
+  //Variable Mode DOMINACAO à remettre à 0 pour le reset
+  NavModeDomination = 0;
+  for (int i = 0; i <= 5; i++) {
+    GestionTemps[i] = 0;
+  }
+  for (int i = 0; i <= 4; i++) {
+    TimerBip[i] = 0;
+  }
+  Animation[0] = 4;
+  Animation[1] = 0;
+  Animation[2] = 14;
+  Animation[3] = 0;
+  Btactif[0] = 0;
+  Btactif[1] = 0;  
+  Clignotementsaisie = 0;
+  //Variable Mode Explosif à remettre à 0 pour le reset
+  NavModeExplosif = 0;
+  NavCodeBombe = 0; 
+  PourcentcumulPenalites = 0;
+  RandomNumSav[0] = 0;
+  RandomNumSav[1] = 0;
+  RandomNumSavNum = 0;
+}
+
+void intro(){
+//INTRO BOMB SIMULATOR ////////////////
+  lcd.setCursor(0, 0);
+  lcd.print("-- Bomb simulator --");
+  lcd.setCursor(0, 2);
+  lcd.print("--     AIRSOFT    --");
+  lcd.setCursor(0, 3);
+  lcd.print("     -- V1.2 --     ");
+  delay(500);   
+///////////////////////////////////////
+}
+
+void chargement(){
+//BARRE CHARGEMENT ////////////////////
+  lcd.setCursor(1, 1);
+  lcd.write(byte(2));
+  for (int i = 2; i <= 17; i++) {
+      lcd.setCursor(i, 1);
+      lcd.write(byte(5));
+  }
+  lcd.setCursor(18, 1);
+  lcd.write(byte(3));
+  for (int i = 2; i <= 17; i++) {
+      lcd.setCursor(i, 1);
+      lcd.write(byte(4));
+      delay(100);
+  } 
+/////////////////////////////////////// 
+}
+
+void Domination(){
+//GESTION JEU DOMINACAO //////////////
+  switch (NavModeDomination) {
+    case 0:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  -- DOMINACAO --  ");
+      NavModeDomination++;
+      break;
+    case 1:
+      chargement();
+      NavModeDomination++;
+      break;
+    case 2:
+      lcd.setCursor(0, 1);
+      lcd.print("   Tempo de Jogo :   ");
+      lcd.setCursor(6, 2);
+      lcd.print(TpsjeuDomination[0]);
+      lcd.setCursor(7, 2);
+      lcd.print(TpsjeuDomination[1]);
+      lcd.setCursor(8, 2);
+      lcd.print(":");
+      lcd.setCursor(9, 2);
+      lcd.print(TpsjeuDomination[2]);
+      lcd.setCursor(10, 2);
+      lcd.print(TpsjeuDomination[3]);
+      lcd.setCursor(11, 2);
+      lcd.print(":");
+      lcd.setCursor(12, 2);
+      lcd.print(TpsjeuDomination[4]);
+      lcd.setCursor(13, 2);
+      lcd.print(TpsjeuDomination[5]);
+      NavModeDomination++;
+      break;
+    case 3:
+      //Saisie H 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btvalider() == 0){
+        lcd.setCursor(6, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btvalider() == 1){
+        lcd.setCursor(6, 2);
+        lcd.print(TpsjeuDomination[0]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      Serial.println(key);
+      if(TpsjeuDomination[1] <= 3 && (key == '0' || key == '1' || key == '2')){
+        TpsjeuDomination[0] = saisieclavier(TpsjeuDomination[0]);
+        lcd.setCursor(6, 2);
+        lcd.print(TpsjeuDomination[0]);
+        NavModeDomination++;    
+      }
+      else if(TpsjeuDomination[1] > 3 && (key == '0' || key == '1')){
+        TpsjeuDomination[0] = saisieclavier(TpsjeuDomination[0]);
+        lcd.setCursor(6, 2);
+        lcd.print(TpsjeuDomination[0]);
+        NavModeDomination++;   
+      }
+      NavModeDomination = NavModeDomination + btdroite() + btvalider();
+      break;
+    case 4:
+      //Saisie HH
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(7, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(7, 2);
+        lcd.print(TpsjeuDomination[1]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      }
+      if(TpsjeuDomination[0] < 2 && (key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9')){
+        TpsjeuDomination[1] = saisieclavier(TpsjeuDomination[1]);
+        lcd.setCursor(7, 2);
+        lcd.print(TpsjeuDomination[1]);
+        NavModeDomination++;    
+      }
+      else if(TpsjeuDomination[0] >= 2 && (key == '0' || key == '1' || key == '2' || key == '3')){
+        TpsjeuDomination[1] = saisieclavier(TpsjeuDomination[1]);
+        lcd.setCursor(7, 2);
+        lcd.print(TpsjeuDomination[1]);
+        NavModeDomination++;    
+      }
+      NavModeDomination = NavModeDomination + btgauche() + btdroite() + btvalider();
+      break;
+    case 5:
+      //Saisie M
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(9, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(9, 2);
+        lcd.print(TpsjeuDomination[2]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5'){
+        TpsjeuDomination[2] = saisieclavier(TpsjeuDomination[2]);
+        lcd.setCursor(9, 2);
+        lcd.print(TpsjeuDomination[2]);
+        NavModeDomination++;    
+      }
+      NavModeDomination = NavModeDomination + btgauche() + btdroite() + btvalider();
+      break;
+    case 6:
+      //Saisie MM
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(10, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1  || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(10, 2);
+        lcd.print(TpsjeuDomination[3]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        TpsjeuDomination[3] = saisieclavier(TpsjeuDomination[3]);
+        lcd.setCursor(10, 2);
+        lcd.print(TpsjeuDomination[3]);
+        NavModeDomination++;    
+      }
+      NavModeDomination = NavModeDomination + btgauche() + btdroite() + btvalider();
+      break;
+    case 7:
+      //Saisie S
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(12, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(12, 2);
+        lcd.print(TpsjeuDomination[4]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5'){
+        TpsjeuDomination[4] = saisieclavier(TpsjeuDomination[4]);
+        lcd.setCursor(12, 2);
+        lcd.print(TpsjeuDomination[4]);
+        NavModeDomination++;    
+      }
+      NavModeDomination = NavModeDomination + btgauche() + btdroite() + btvalider();
+      break;
+    case 8:
+      //Saisie SS
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(13, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1  || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(13, 2);
+        lcd.print(TpsjeuDomination[5]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        TpsjeuDomination[5] = saisieclavier(TpsjeuDomination[5]);
+        lcd.setCursor(13, 2);
+        lcd.print(TpsjeuDomination[5]);
+        NavModeDomination++;    
+      }
+      NavModeDomination = NavModeDomination + btgauche() + btdroite() + btvalider();
+      break;
+    case 9:
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      if(btgauche() == -1){
+        lcd.setCursor(0, 3);
+        lcd.print("                    ");  
+      }
+      NavModeDomination = NavModeDomination + btgauche() + btvalider();
+      break;
+    case 10:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  -- Dominacao --  ");
+      lcd.setCursor(0, 1);
+      lcd.print(" Inicio do Jogo : ");
+      NavModeDomination++;
+      break;
+    case 11:
+    //Saisie M
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(5, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(5, 2);
+        lcd.print(TpsjeuDomination[6]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      }
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5'){
+        TpsjeuDomination[6] = saisieclavier(TpsjeuDomination[6]);
+        lcd.setCursor(5, 2);
+        lcd.print(TpsjeuDomination[6]);
+        NavModeDomination++;    
+      }
+      if(TpsjeuDomination[6] <=1){
+        lcd.setCursor(6, 2);
+        lcd.print(" minuto ");
+      }
+      else{
+        lcd.setCursor(6, 2);
+        lcd.print(" minutos");
+      }
+      NavModeDomination = NavModeDomination + btdroite() + btvalider();
+      break;
+    case 12:
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      if(btgauche() == -1){
+        lcd.setCursor(0, 3);
+        lcd.print("                    ");  
+      }
+      NavModeDomination = NavModeDomination + btgauche() + btvalider();
+      break;
+    case 13:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  -- DOMINACAO --  ");
+      lcd.setCursor(1, 1);
+      lcd.print("Capteur mouvement  ");
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      NavModeDomination++;
+      break;
+    case 14:
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0){
+        lcd.setCursor(4, 2);
+        lcd.print("-         -"); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1){
+        if(Actifcptmouv == 0){
+          lcd.setCursor(4, 2);
+          lcd.print("-  Actif  -");  
+        }
+        else{
+          lcd.setCursor(4, 2);
+          lcd.print("- Inactif -");  
+        }
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      }
+      if (flechehaut() == 1 || flechebas() == -1){
+        Actifcptmouv = !Actifcptmouv;  
+      }
+      NavModeDomination = NavModeDomination + btvalider();
+      break;
+    case 15:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  -- DOMINACAO --  ");
+      NavModeDomination++;
+      break;
+    case 16:
+      lcd.setCursor(0, 1);
+      lcd.print("Tps jeu : ");
+      lcd.setCursor(12, 1);
+      lcd.print(TpsjeuDomination[0]);
+      lcd.setCursor(13, 1);
+      lcd.print(TpsjeuDomination[1]);
+      lcd.setCursor(14, 1);
+      lcd.print(":");
+      lcd.setCursor(15, 1);
+      lcd.print(TpsjeuDomination[2]);
+      lcd.setCursor(16, 1);
+      lcd.print(TpsjeuDomination[3]);
+      lcd.setCursor(17, 1);
+      lcd.print(":");
+      lcd.setCursor(18, 1);
+      lcd.print(TpsjeuDomination[4]);
+      lcd.setCursor(19, 1);
+      lcd.print(TpsjeuDomination[5]);
+      lcd.setCursor(0, 2);
+      lcd.print("Start Jogo : ");
+      lcd.setCursor(14, 2);
+      lcd.print(TpsjeuDomination[6]);
+      lcd.setCursor(15, 2);
+      lcd.print(" min");
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para jogar");
+      NavModeDomination = NavModeDomination + btvalider();
+      break;
+    case 17:
+      lcd.clear();
+      GestionTemps[0] = TpsjeuDomination[6];
+      lcd.setCursor(0, 0);
+      lcd.print("  -- DOMINACAO --  ");
+      lcd.setCursor(0, 1);
+      lcd.print(" inicio do jogo : ");
+      lcd.setCursor(6, 2);
+      lcd.print("00");  
+      lcd.setCursor(8, 2);
+      lcd.print(":0");
+      lcd.setCursor(10, 2);
+      lcd.print(GestionTemps[0]);
+      lcd.setCursor(11, 2);
+      lcd.print(":");
+      lcd.setCursor(12, 2);
+      lcd.print("00");
+      NavModeDomination++;
+      break;
+    case 18:
+      if(Timersecpartie == 0){
+        Timersecpartie = currentTime; 
+      }
+      else if (currentTime > (Timersecpartie + 1000)){
+        if(GestionTemps[1] > 0){
+          GestionTemps[1]--;
+          if(GestionTemps[1] >= 10){
+            lcd.setCursor(12, 2);
+            lcd.print(GestionTemps[1]);  
+          }
+          else{
+            lcd.setCursor(12, 2);
+            lcd.print("0");
+            lcd.setCursor(13, 2);
+            lcd.print(GestionTemps[1]);
+          }
+        }
+      else if(GestionTemps[1] == 0 && GestionTemps[0] > 0){
+        GestionTemps[1] = 59;
+        GestionTemps[0]--;
+          lcd.setCursor(10, 2);
+          lcd.print(GestionTemps[0]);
+          lcd.setCursor(12, 2);
+          lcd.print(GestionTemps[1]);
+      }
+      else{
+        NavModeDomination++;  
+      }
+        Timersecpartie = currentTime;     
+      } 
+      bipper1();
+      break; 
+    case 19:
+      for (int i = 0; i <= 5; i++) {
+        GestionTemps[i] = 0;
+      }
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  -- DOMINACAO --  ");
+      lcd.setCursor(0, 1);
+      lcd.print("Equipe R    Equipe V");
+      lcd.setCursor(0, 2);
+      lcd.print("00:00:00");
+      lcd.setCursor(12, 2);
+      lcd.print("00:00:00");
+      lcd.setCursor(0, 3);
+      lcd.print("Objectif :");
+      lcd.setCursor(12, 3);
+      lcd.print(TpsjeuDomination[0]);
+      lcd.setCursor(13, 3);
+      lcd.print(TpsjeuDomination[1]);
+      lcd.setCursor(14, 3);
+      lcd.print(":");
+      lcd.setCursor(15, 3);
+      lcd.print(TpsjeuDomination[2]);
+      lcd.setCursor(16, 3);
+      lcd.print(TpsjeuDomination[3]);
+      lcd.setCursor(17, 3);
+      lcd.print(":");
+      lcd.setCursor(18, 3);
+      lcd.print(TpsjeuDomination[4]);
+      lcd.setCursor(19, 3);
+      lcd.print(TpsjeuDomination[5]);
+      digitalWrite(ledrouge , HIGH);
+      NavModeDomination++;
+      break; 
+    case 20:
+      bipper3();
+      EtatboutonVert = digitalRead(btvert);
+      EtatboutonRouge = digitalRead(btrouge);
+      EtatcptMercure = digitalRead(cptmercure);
+      if(EtatcptMercure == 0 && Actifcptmouv == 0){
+        bipper4();
+         Serial.println(EtatcptMercure);
+      }
+      else{
+        if(Btactif[0] == 1){
+          bipper1();  
+        }
+        else if (Btactif[1] == 1){
+          bipper2();  
+        }  
+      }
+      if(EtatboutonVert == 0){
+        Btactif[0] = 0;
+        Btactif[1] = 1;     
+      }
+      else if (EtatboutonRouge == 0){
+        Btactif[0] = 1;
+        Btactif[1] = 0;     
+      }
+      if(Timersecpartie == 0){
+        currentTime = millis();
+        Timersecpartie = currentTime; 
+      }
+      else if (currentTime > (Timersecpartie + 1000)){ 
+        if(Btactif[0] == 1){
+          GestionTemps[2]++;  
+          if(GestionTemps[2] >= 10){
+            lcd.setCursor(6, 2);
+            lcd.print(GestionTemps[2]);  
+          }
+          else{
+            lcd.setCursor(6, 2);
+            lcd.print("0");
+            lcd.setCursor(7, 2);
+            lcd.print(GestionTemps[2]);
+          }
+        }
+        else if(Btactif[1] == 1){
+          GestionTemps[5]++;
+          if(GestionTemps[5] >= 10){
+            lcd.setCursor(18, 2);
+            lcd.print(GestionTemps[5]);  
+          }
+          else{
+            lcd.setCursor(18, 2);
+            lcd.print("0");
+            lcd.setCursor(19, 2);
+            lcd.print(GestionTemps[5]);
+          }
+        }
+        Timersecpartie = currentTime;  
+      }
+      if(GestionTemps[5] > 59){
+        GestionTemps[4]++;  
+        GestionTemps[5] = 0;
+        if(GestionTemps[4] >= 10){
+          lcd.setCursor(15, 2);
+          lcd.print(GestionTemps[4]);  
+        }
+        else{
+          lcd.setCursor(15, 2);
+          lcd.print("0");
+          lcd.setCursor(16, 2);
+          lcd.print(GestionTemps[4]);
+        }
+        lcd.setCursor(18, 2);
+        lcd.print("0");
+        lcd.setCursor(19, 2);
+        lcd.print(GestionTemps[5]);
+      }
+      if(GestionTemps[4] > 59){
+        GestionTemps[3]++;  
+        GestionTemps[4] = 0;
+        if(GestionTemps[0] >= 10){
+          lcd.setCursor(12, 2);
+          lcd.print(GestionTemps[3]);  
+        }
+        else{
+          lcd.setCursor(12, 2);
+          lcd.print("0");
+          lcd.setCursor(13, 2);
+          lcd.print(GestionTemps[3]);
+        }
+        lcd.setCursor(15, 2);
+        lcd.print("0");
+        lcd.setCursor(16, 2);
+        lcd.print(GestionTemps[4]);
+      }
+      if(GestionTemps[2] > 59){
+        GestionTemps[1]++;  
+        GestionTemps[2] = 0;
+        if(GestionTemps[1] >= 10){
+          lcd.setCursor(3, 2);
+          lcd.print(GestionTemps[1]);  
+        }
+        else{
+          lcd.setCursor(3, 2);
+          lcd.print("0");
+          lcd.setCursor(4, 2);
+          lcd.print(GestionTemps[1]);
+        }
+        lcd.setCursor(6, 2);
+        lcd.print("0");
+        lcd.setCursor(7, 2);
+        lcd.print(GestionTemps[2]);
+      }
+      if(GestionTemps[1] > 59){
+        GestionTemps[0]++;  
+        GestionTemps[1] = 0;
+        if(GestionTemps[0] >= 10){
+          lcd.setCursor(0, 2);
+          lcd.print(GestionTemps[0]);  
+        }
+        else{
+          lcd.setCursor(0, 2);
+          lcd.print("0");
+          lcd.setCursor(1, 2);
+          lcd.print(GestionTemps[0]);
+        }
+        lcd.setCursor(3, 2);
+        lcd.print("0");
+        lcd.setCursor(4, 2);
+        lcd.print(GestionTemps[1]);
+      }
+      if( (GestionTemps[0] >= ((TpsjeuDomination[0]*10) + TpsjeuDomination[1])) && (GestionTemps[1] >= (TpsjeuDomination[2]*10) + TpsjeuDomination[3]) && (GestionTemps[2] >= (TpsjeuDomination[4]*10) + TpsjeuDomination[5])){
+        NavModeDomination++; 
+        TimerBip[2] = currentTime;  
+        lcd.clear();  
+      }
+      if( (GestionTemps[3] >= ((TpsjeuDomination[0]*10) + TpsjeuDomination[1])) && (GestionTemps[4] >= (TpsjeuDomination[2]*10) + TpsjeuDomination[3]) && (GestionTemps[5] >= (TpsjeuDomination[4]*10) + TpsjeuDomination[5])){
+        NavModeDomination = 22;  
+        TimerBip[2] = currentTime; 
+        lcd.clear();  
+      }
+      break;
+    case 21:
+      digitalWrite(ledrouge , LOW);
+      lcd.setCursor(0, 0);
+      lcd.print("  -- DOMINACAO --  ");
+      lcd.setCursor(0, 2);
+      lcd.print("  Vermelho Venceu  ");
+      animation1();
+      bipper3();
+      break; 
+    case 22:
+      digitalWrite(ledrouge , LOW);
+      lcd.setCursor(0, 0);
+      lcd.print("  -- DOMINACAO --  ");
+      lcd.setCursor(0, 2);
+      lcd.print("   Verde Venceu   ");
+      animation1();
+      bipper3();
+      break;    
+    default:
+      break;
+  }
+}
+
+void animation1(){
+  if(Timersecpartie == 0){
+    Timersecpartie = currentTime; 
+  }
+  else if (currentTime > (Timersecpartie + 100)){
+    Timersecpartie = currentTime; 
+    if(Animation[1] == 0 && Animation[0] < 13){
+      Animation[0]++; 
+      Animation[2]--;
+      lcd.setCursor(Animation[0], 3);
+      lcd.print("-"); 
+      lcd.setCursor(Animation[2], 1);
+      lcd.print("-"); 
+    }
+    else if (Animation[1] == 0 && Animation[0] == 13){
+      Animation[1] = 1;
+    }
+    else if (Animation[1] == 1 && Animation[0] > 4){
+      lcd.setCursor(Animation[0], 3);
+      lcd.print(" "); 
+      lcd.setCursor(Animation[2], 1);
+      lcd.print(" ");   
+      Animation[0]--; 
+      Animation[2]++;
+    }
+    else if(Animation[1] == 1 && Animation[0] == 4){
+      lcd.setCursor(Animation[0], 3);
+      lcd.print(" "); 
+      lcd.setCursor(Animation[2], 1);
+      lcd.print(" "); 
+      Animation[1] = 0;  
+    }  
+  }  
+}
+
+void bipper1(){
+  if(TimerBip[0] == 0){
+    TimerBip[0] = currentTime; 
+  }
+  else if (currentTime > (TimerBip[0] + 950) && currentTime < (TimerBip[0] + 1000)){
+    digitalWrite(bipper , HIGH); 
+  }
+  else if (currentTime > (TimerBip[0] + 1000)){
+    TimerBip[0] = currentTime; 
+    digitalWrite(bipper, LOW);
+  }  
+}
+
+void bipper2(){
+  if(TimerBip[1] == 0){
+    TimerBip[1] = currentTime; 
+  }
+  else if (currentTime > (TimerBip[1] + 750) && currentTime < (TimerBip[1] + 800)){
+    digitalWrite(bipper , HIGH); 
+  }
+  else if (currentTime > (TimerBip[1] + 850) && currentTime < (TimerBip[1] + 900)){
+    digitalWrite(bipper, LOW);
+  }
+  else if (currentTime > (TimerBip[1] + 950) && currentTime < (TimerBip[1] + 1000)){
+    digitalWrite(bipper , HIGH); 
+  }
+  else if (currentTime > (TimerBip[1] + 1000)){
+    TimerBip[1] = currentTime; 
+  digitalWrite(bipper, LOW);
+  } 
+}
+
+void bipper3(){
+  if(TimerBip[2] == 0){
+    TimerBip[2] = currentTime; 
+  }
+  else if (currentTime > TimerBip[2] && currentTime < (TimerBip[2] + 2500)){
+    digitalWrite(bipper , HIGH); 
+    digitalWrite(relayalarme , HIGH); 
+  }
+  else if (currentTime > (TimerBip[2] + 2500)){
+    digitalWrite(bipper, LOW);
+    digitalWrite(relayalarme, LOW);
+  }
+}
+
+void bipper4(){
+  
+  if(TimerBip[3] == 0){
+    TimerBip[3] = currentTime; 
+  }
+  else if (currentTime > (TimerBip[3]) && currentTime < (TimerBip[3] + 100)){
+    digitalWrite(bipper , HIGH); 
+  }
+  else if (currentTime > (TimerBip[3] + 200) && currentTime < (TimerBip[3] + 300)){
+    digitalWrite(bipper, LOW);
+  }
+  else if (currentTime > (TimerBip[3] + 300) && currentTime < (TimerBip[3] + 400)){
+    digitalWrite(bipper , HIGH); 
+  }
+  else if (currentTime > (TimerBip[3] + 400) && currentTime < (TimerBip[3] + 500)){ 
+    digitalWrite(bipper, LOW);
+  } 
+  else if (currentTime > (TimerBip[3] + 500)){
+    TimerBip[3] = currentTime;
+  }
+}
+
+void bipper5(){
+  
+  if(TimerBip[4] == 0){
+    TimerBip[4] = currentTime; 
+  }
+  else if (currentTime > (TimerBip[4]) && currentTime < (TimerBip[4] + 100)){
+    digitalWrite(bipper , HIGH); 
+    digitalWrite(relayalarme , HIGH); 
+  }
+  else if (currentTime > (TimerBip[4] + 200) && currentTime < (TimerBip[4] + 800)){
+    digitalWrite(bipper, LOW);
+    digitalWrite(relayalarme , LOW); 
+  }
+  else if (currentTime > (TimerBip[4] + 800) && currentTime < (TimerBip[4] + 900)){
+    digitalWrite(bipper , HIGH);
+    digitalWrite(relayalarme , HIGH);  
+  }
+  else if (currentTime > (TimerBip[4] + 900) && currentTime < (TimerBip[4] + 1500)){ 
+    digitalWrite(bipper, LOW);
+    digitalWrite(relayalarme , LOW); 
+  } 
+  else if (currentTime > (TimerBip[4] + 1500) && currentTime < (TimerBip[4] + 3000)){
+    digitalWrite(bipper , HIGH); 
+    digitalWrite(relayalarme , HIGH); 
+  }
+  else if (currentTime > (TimerBip[4] + 3000) && currentTime < (TimerBip[4] + 5000)){ 
+    digitalWrite(bipper, LOW);
+    digitalWrite(relayalarme , LOW); 
+  } 
+}
+
+void Explosif(){
+//GESTION JEU EXPLOSIF //////////////
+  switch (NavModeExplosif) {
+    case 0:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      NavModeExplosif++;
+      break;
+    case 1:
+      chargement();
+      NavModeExplosif++;
+      break;
+    case 2:
+      lcd.setCursor(0, 1);
+      lcd.print("  Tempo de Jogo :  ");
+      lcd.setCursor(6, 2);
+      lcd.print(TpsjeuExplosif[0]);
+      lcd.setCursor(7, 2);
+      lcd.print(TpsjeuExplosif[1]);
+      lcd.setCursor(8, 2);
+      lcd.print(":");
+      lcd.setCursor(9, 2);
+      lcd.print(TpsjeuExplosif[2]);
+      lcd.setCursor(10, 2);
+      lcd.print(TpsjeuExplosif[3]);
+      lcd.setCursor(11, 2);
+      lcd.print(":");
+      lcd.setCursor(12, 2);
+      lcd.print(TpsjeuExplosif[4]);
+      lcd.setCursor(13, 2);
+      lcd.print(TpsjeuExplosif[5]);
+      NavModeExplosif++;
+      break;
+   case 3:
+      //Saisie H 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btvalider() == 0){
+        lcd.setCursor(6, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btvalider() == 1){
+        lcd.setCursor(6, 2);
+        lcd.print(TpsjeuExplosif[0]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(TpsjeuExplosif[1] <= 3 && (key == '0' || key == '1' || key == '2')){
+        TpsjeuExplosif[0] = saisieclavier(TpsjeuExplosif[0]);
+        lcd.setCursor(6, 2);
+        lcd.print(TpsjeuExplosif[0]);
+        NavModeExplosif++;    
+      }
+      else if(TpsjeuExplosif[1] > 3 && (key == '0' || key == '1')){
+        TpsjeuExplosif[0] = saisieclavier(TpsjeuExplosif[0]);
+        lcd.setCursor(6, 2);
+        lcd.print(TpsjeuExplosif[0]);
+        NavModeExplosif++;   
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btvalider();
+      break;
+    case 4:
+      //Saisie HH
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(7, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(7, 2);
+        lcd.print(TpsjeuExplosif[1]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      }
+      if(TpsjeuExplosif[0] < 2 && (key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9')){
+        TpsjeuExplosif[1] = saisieclavier(TpsjeuExplosif[1]);
+        lcd.setCursor(7, 2);
+        lcd.print(TpsjeuExplosif[1]);
+        NavModeExplosif++;    
+      }
+      else if(TpsjeuExplosif[0] >= 2 && (key == '0' || key == '1' || key == '2' || key == '3')){
+        TpsjeuExplosif[1] = saisieclavier(TpsjeuExplosif[1]);
+        lcd.setCursor(7, 2);
+        lcd.print(TpsjeuExplosif[1]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btdroite() + btvalider();
+      break;
+    case 5:
+      //Saisie M
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(9, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(9, 2);
+        lcd.print(TpsjeuExplosif[2]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5'){
+        TpsjeuExplosif[2] = saisieclavier(TpsjeuExplosif[2]);
+        lcd.setCursor(9, 2);
+        lcd.print(TpsjeuExplosif[2]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btdroite() + btvalider();
+      break;
+    case 6:
+      //Saisie MM
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(10, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1  || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(10, 2);
+        lcd.print(TpsjeuExplosif[3]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        TpsjeuExplosif[3] = saisieclavier(TpsjeuExplosif[3]);
+        lcd.setCursor(10, 2);
+        lcd.print(TpsjeuExplosif[3]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btdroite() + btvalider();
+      break;
+    case 7:
+      //Saisie S
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(12, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(12, 2);
+        lcd.print(TpsjeuExplosif[4]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5'){
+        TpsjeuExplosif[4] = saisieclavier(TpsjeuExplosif[4]);
+        lcd.setCursor(12, 2);
+        lcd.print(TpsjeuExplosif[4]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btdroite() + btvalider();
+      break;
+    case 8:
+      //Saisie SS
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(13, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1  || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(13, 2);
+        lcd.print(TpsjeuExplosif[5]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        TpsjeuExplosif[5] = saisieclavier(TpsjeuExplosif[5]);
+        lcd.setCursor(13, 2);
+        lcd.print(TpsjeuExplosif[5]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btdroite() + btvalider();
+      break;
+    case 9:
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      if(btgauche() == -1){
+        lcd.setCursor(0, 3);
+        lcd.print("                    ");  
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btvalider();
+      break;
+    case 10:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 1);
+      lcd.print("  Inicio do jogo :  ");
+      NavModeExplosif++;
+      break;
+    case 11:
+    //Saisie M
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(5, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(5, 2);
+        lcd.print(TpsjeuExplosif[6]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      }
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5'){
+        TpsjeuExplosif[6] = saisieclavier(TpsjeuExplosif[6]);
+        lcd.setCursor(5, 2);
+        lcd.print(TpsjeuExplosif[6]);
+        NavModeExplosif++;    
+      }
+      if(TpsjeuDomination[6] <=1){
+        lcd.setCursor(6, 2);
+        lcd.print(" minuto ");
+      }
+      else{
+        lcd.setCursor(6, 2);
+        lcd.print(" minutos");
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btvalider();
+      break;
+    case 12:
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      if(btgauche() == -1){
+        lcd.setCursor(0, 3);
+        lcd.print("                    ");  
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btvalider();
+      break;
+    case 13:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO --  ");
+      lcd.setCursor(1, 1);
+      lcd.print("Capturar Monimento  ");
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      NavModeExplosif++;
+      break;
+    case 14:
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0){
+        lcd.setCursor(4, 2);
+        lcd.print("-         -"); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1){
+        if(Actifcptmouv == 0){
+          lcd.setCursor(4, 2);
+          lcd.print("-  Ativado  -");  
+        }
+        else{
+          lcd.setCursor(4, 2);
+          lcd.print("- Desativado -");  
+        }
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      }
+      if (flechehaut() == 1 || flechebas() == -1){
+        Actifcptmouv = !Actifcptmouv;  
+      }
+      NavModeExplosif = NavModeExplosif + btvalider();
+      break;
+    case 15:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 1);
+      lcd.print(" Codigo da Bomba : ");
+      lcd.setCursor(8, 2);
+      lcd.print(CodeExplosif[0]);
+      lcd.setCursor(9, 2);
+      lcd.print(CodeExplosif[1]);
+      lcd.setCursor(10, 2);
+      lcd.print(CodeExplosif[2]);
+      lcd.setCursor(11, 2);
+      lcd.print(CodeExplosif[3]);
+      NavModeExplosif++;
+      break; 
+    case 16:
+      //Saisie 1 chiffre code 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btvalider() == 0){
+        lcd.setCursor(8, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btvalider() == 1){
+        lcd.setCursor(8, 2);
+        lcd.print(CodeExplosif[0]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        CodeExplosif[0] = saisieclavier(CodeExplosif[0]);
+        lcd.setCursor(8, 2);
+        lcd.print(CodeExplosif[0]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btvalider();
+      break;
+    case 17:
+      //Saisie 2 chiffre code 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0&& btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(9, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(9, 2);
+        lcd.print(CodeExplosif[1]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        CodeExplosif[1] = saisieclavier(CodeExplosif[1]);
+        lcd.setCursor(9, 2);
+        lcd.print(CodeExplosif[1]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btgauche() + btvalider();
+      break;
+    case 18:
+      //Saisie 3 chiffre code 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0&& btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(10, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(10, 2);
+        lcd.print(CodeExplosif[2]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        CodeExplosif[2] = saisieclavier(CodeExplosif[2]);
+        lcd.setCursor(10, 2);
+        lcd.print(CodeExplosif[2]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btgauche() + btvalider();
+      break;
+    case 19:
+      //Saisie 4 chiffre code 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(11, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(11, 2);
+        lcd.print(CodeExplosif[3]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        CodeExplosif[3] = saisieclavier(CodeExplosif[3]);
+        lcd.setCursor(11, 2);
+        lcd.print(CodeExplosif[3]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btgauche() + btvalider();
+      break;
+    case 20:
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      if(btgauche() == -1){
+        lcd.setCursor(0, 3);
+        lcd.print("                    ");  
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btvalider();
+        break;
+    case 21:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 1);
+      lcd.print(" % Temps penalidade : ");
+      lcd.setCursor(0, 2);
+      lcd.print("Fil1: ");
+      lcd.setCursor(6, 2);
+      lcd.print(PourcentPenalite[0]);
+      lcd.setCursor(7, 2);
+      lcd.print(PourcentPenalite[1]);
+      lcd.setCursor(8, 2);
+      lcd.print("%");
+      lcd.setCursor(11, 2);
+      lcd.print("Fil2: ");
+      lcd.setCursor(17, 2);
+      lcd.print(PourcentPenalite[2]);
+      lcd.setCursor(18, 2);
+      lcd.print(PourcentPenalite[3]);
+      lcd.setCursor(19, 2);
+      lcd.print("%");
+      NavModeExplosif++;
+      break; 
+    case 22:
+      //Saisie 1 chiffre fil 1 Penalité 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btvalider() == 0){
+        lcd.setCursor(6, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btvalider() == 1){
+        lcd.setCursor(6, 2);
+        lcd.print(PourcentPenalite[0]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[0] = saisieclavier(PourcentPenalite[0]);
+        lcd.setCursor(6, 2);
+        lcd.print(PourcentPenalite[0]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btvalider();
+      break;  
+    case 23:
+      //Saisie 2 chiffre fil 1 Penalité  
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(7, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(7, 2);
+        lcd.print(PourcentPenalite[1]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[1] = saisieclavier(PourcentPenalite[1]);
+        lcd.setCursor(7, 2);
+        lcd.print(PourcentPenalite[1]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite()+ btgauche() + btvalider();
+      break;    
+    case 24:
+      //Saisie 1 chiffre fil 2 Penalité  
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(17, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(17, 2);
+        lcd.print(PourcentPenalite[2]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[2] = saisieclavier(PourcentPenalite[2]);
+        lcd.setCursor(17, 2);
+        lcd.print(PourcentPenalite[2]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite()+ btgauche() + btvalider();
+      break;   
+    case 25:
+      //Saisie 2 chiffre fil 2 Penalité  
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(18, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(18, 2);
+        lcd.print(PourcentPenalite[3]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[3] = saisieclavier(PourcentPenalite[3]);
+        lcd.setCursor(18, 2);
+        lcd.print(PourcentPenalite[3]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite()+ btgauche() + btvalider();
+      break;  
+    case 26:
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      if(btgauche() == -1){
+        lcd.setCursor(0, 3);
+        lcd.print("                    ");  
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btvalider();
+      break;  
+    case 27:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 1);
+      lcd.print(" % Temps penalite : ");
+      lcd.setCursor(0, 2);
+      lcd.print("Mov: ");
+      lcd.setCursor(6, 2);
+      lcd.print(PourcentPenalite[4]);
+      lcd.setCursor(7, 2);
+      lcd.print(PourcentPenalite[5]);
+      lcd.setCursor(8, 2);
+      lcd.print("%");
+      lcd.setCursor(11, 2);
+      lcd.print("Code: ");
+      lcd.setCursor(17, 2);
+      lcd.print(PourcentPenalite[6]);
+      lcd.setCursor(18, 2);
+      lcd.print(PourcentPenalite[7]);
+      lcd.setCursor(19, 2);
+      lcd.print("%");
+      NavModeExplosif++;
+      break; 
+    case 28:
+      //Saisie 1 chiffre fil 3 Penalité 
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btvalider() == 0){
+        lcd.setCursor(6, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btvalider() == 1){
+        lcd.setCursor(6, 2);
+        lcd.print(PourcentPenalite[4]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      Serial.println(key);
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[4] = saisieclavier(PourcentPenalite[4]);
+        lcd.setCursor(6, 2);
+        lcd.print(PourcentPenalite[4]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite() + btvalider();
+      break;  
+    case 29:
+      //Saisie 2 chiffre fil 3 Penalité  
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(7, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(7, 2);
+        lcd.print(PourcentPenalite[5]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[5] = saisieclavier(PourcentPenalite[5]);
+        lcd.setCursor(7, 2);
+        lcd.print(PourcentPenalite[5]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite()+ btgauche() + btvalider();
+      break;    
+    case 30:
+      //Saisie 1 chiffre code Penalité  
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(17, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(17, 2);
+        lcd.print(PourcentPenalite[6]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[6] = saisieclavier(PourcentPenalite[6]);
+        lcd.setCursor(17, 2);
+        lcd.print(PourcentPenalite[6]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite()+ btgauche() + btvalider();
+      break;   
+    case 31:
+      //Saisie 2 chiffre code Penalité  
+      if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+        lcd.setCursor(18, 2);
+        lcd.print(" "); 
+      }
+      else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+        lcd.setCursor(18, 2);
+        lcd.print(PourcentPenalite[7]);
+      }
+      else if (currentTime >= (Clignotementsaisie+1600)){
+        Clignotementsaisie = currentTime;      
+      } 
+      if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+        PourcentPenalite[7] = saisieclavier(PourcentPenalite[7]);
+        lcd.setCursor(18, 2);
+        lcd.print(PourcentPenalite[7]);
+        NavModeExplosif++;    
+      }
+      NavModeExplosif = NavModeExplosif + btdroite()+ btgauche() + btvalider();
+      break;  
+    case 32:
+      lcd.setCursor(0, 3);
+      lcd.print("Press # para validar");
+      if(btgauche() == -1){
+        lcd.setCursor(0, 3);
+        lcd.print("                    ");  
+      }
+      NavModeExplosif = NavModeExplosif + btgauche() + btvalider();
+      break;
+    case 33:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      NavModeExplosif++;
+      break;
+    case 34:
+      lcd.setCursor(0, 1);
+      lcd.print("Tps jeu : ");
+      lcd.setCursor(12, 1);
+      lcd.print(TpsjeuExplosif[0]);
+      lcd.setCursor(13, 1);
+      lcd.print(TpsjeuExplosif[1]);
+      lcd.setCursor(14, 1);
+      lcd.print(":");
+      lcd.setCursor(15, 1);
+      lcd.print(TpsjeuExplosif[2]);
+      lcd.setCursor(16, 1);
+      lcd.print(TpsjeuExplosif[3]);
+      lcd.setCursor(17, 1);
+      lcd.print(":");
+      lcd.setCursor(18, 1);
+      lcd.print(TpsjeuExplosif[4]);
+      lcd.setCursor(19, 1);
+      lcd.print(TpsjeuExplosif[5]);
+      lcd.setCursor(0, 2);
+      lcd.print("Debut jeu : ");
+      lcd.setCursor(14, 2);
+      lcd.print(TpsjeuExplosif[6]);
+      lcd.setCursor(15, 2);
+      lcd.print(" min");
+      lcd.setCursor(0, 3);
+      lcd.print("Press # pour lancer");
+      NavModeExplosif = NavModeExplosif + btvalider();
+      break;
+    case 35:
+      lcd.clear();
+      GestionTemps[0] = TpsjeuExplosif[6];
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 1);
+      lcd.print("   Debut du jeu :   ");
+      lcd.setCursor(6, 2);
+      lcd.print("00");  
+      lcd.setCursor(8, 2);
+      lcd.print(":0");
+      lcd.setCursor(10, 2);
+      lcd.print(GestionTemps[0]);
+      lcd.setCursor(11, 2);
+      lcd.print(":");
+      lcd.setCursor(12, 2);
+      lcd.print("00");
+      NavModeExplosif++;
+      break;
+    case 36:
+      if(Timersecpartie == 0){
+        Timersecpartie = currentTime; 
+      }
+      else if (currentTime > (Timersecpartie + 1000)){
+        if(GestionTemps[1] > 0){
+          GestionTemps[1]--;
+          if(GestionTemps[1] >= 10){
+            lcd.setCursor(12, 2);
+            lcd.print(GestionTemps[1]);  
+          }
+          else{
+            lcd.setCursor(12, 2);
+            lcd.print("0");
+            lcd.setCursor(13, 2);
+            lcd.print(GestionTemps[1]);
+          }
+        }
+      else if(GestionTemps[1] == 0 && GestionTemps[0] > 0){
+        GestionTemps[1] = 59;
+        GestionTemps[0]--;
+          lcd.setCursor(10, 2);
+          lcd.print(GestionTemps[0]);
+          lcd.setCursor(12, 2);
+          lcd.print(GestionTemps[1]);
+      }
+      else{
+        NavModeExplosif++;  
+      }
+        Timersecpartie = currentTime;     
+      } 
+      bipper1();
+      break; 
+    case 37:
+      for (int i = 0; i <= 5; i++) {
+        GestionTemps[i] = 0;
+      }
+      GestionTemps[2] = (TpsjeuExplosif[4]*10) + TpsjeuExplosif[5];
+      GestionTemps[1] = (TpsjeuExplosif[2]*10) + TpsjeuExplosif[3];
+      GestionTemps[0] = (TpsjeuExplosif[0]*10) + TpsjeuExplosif[1];
+      TpsDecrementationBombe = 1000;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 1);
+      lcd.print("    Bombe Active    "); 
+      if(GestionTemps[0] >= 10){
+        lcd.setCursor(6, 2);
+        lcd.print(GestionTemps[0]);  
+      }
+      else{
+        lcd.setCursor(6, 2);
+        lcd.print("0");
+        lcd.setCursor(7, 2);
+        lcd.print(GestionTemps[0]);
+      }
+      lcd.setCursor(8, 2);
+      lcd.print(":");
+      if(GestionTemps[1] >= 10){
+        lcd.setCursor(9, 2);
+        lcd.print(GestionTemps[1]);  
+      }
+      else{
+        lcd.setCursor(9, 2);
+        lcd.print("0");
+        lcd.setCursor(10, 2);
+        lcd.print(GestionTemps[1]);
+      }
+      lcd.setCursor(11, 2);
+      lcd.print(":");
+      if(GestionTemps[2] >= 10){
+        lcd.setCursor(12, 2);
+        lcd.print(GestionTemps[2]);  
+      }
+      else{
+        lcd.setCursor(12, 2);
+        lcd.print("0");
+        lcd.setCursor(13, 2);
+        lcd.print(GestionTemps[2]);
+      }
+      lcd.setCursor(0, 3);
+      lcd.print("Code : "); 
+      lcd.setCursor(7, 3);
+      lcd.print("____"); 
+      lcd.setCursor(15, 3);
+      lcd.print("P:00%");
+      digitalWrite(ledrouge , HIGH);
+      NavModeExplosif++;
+      break; 
+    case 38:
+      bipper3();
+      EtatcptMercure = digitalRead(cptmercure);
+      Randomnum = random(1 , 5);  
+      EtatFilcouper = analogRead(Fildesamorcage);   
+      TpsDecrementationBombe = 1000 - ((10000*PourcentcumulPenalites)/1000);
+      if(EtatcptMercure == 0 && Actifcptmouv == 0){
+        bipper4();
+          if(TimerActifcptmouv == 0){
+            TimerActifcptmouv = currentTime; 
+          }
+          else if (currentTime > (TimerActifcptmouv + 1000)){
+            PourcentcumulPenalites = PourcentcumulPenalites + (PourcentPenalite[4]*10) + PourcentPenalite[5];
+            TimerActifcptmouv = currentTime;  ;
+          }
+      }
+      else{
+        TimerActifcptmouv = 0;
+      }
+      if(Timersecpartie == 0){
+        Timersecpartie = currentTime; 
+      }      
+      else if (currentTime > (Timersecpartie + TpsDecrementationBombe)){ 
+        if(GestionTemps[2] > 0){
+          GestionTemps[2]--;  
+          if(GestionTemps[2] >= 10){
+            lcd.setCursor(12, 2);
+            lcd.print(GestionTemps[2]);  
+          }
+          else{
+            lcd.setCursor(12, 2);
+            lcd.print("0");
+            lcd.setCursor(13, 2);
+            lcd.print(GestionTemps[2]);
+          } 
+        }
+        else if(GestionTemps[2] == 0 && GestionTemps[1] > 0){
+          GestionTemps[1]--;  
+          GestionTemps[2] = 59;
+          if(GestionTemps[1] >= 10){
+            lcd.setCursor(9, 2);
+            lcd.print(GestionTemps[1]);  
+          }
+          else{
+            lcd.setCursor(9, 2);
+            lcd.print("0");
+            lcd.setCursor(10, 2);
+            lcd.print(GestionTemps[1]);
+          }
+          lcd.setCursor(12, 2);
+          lcd.print(GestionTemps[2]);    
+        }
+        else if(GestionTemps[0] > 0 && GestionTemps[2] == 0 && GestionTemps[1] == 0){
+          GestionTemps[0]--;  
+          GestionTemps[1] = 59;
+          GestionTemps[2] = 59;
+          if(GestionTemps[0] >= 10){
+            lcd.setCursor(6, 2);
+            lcd.print(GestionTemps[0]);  
+          }
+          else{
+            lcd.setCursor(6, 2);
+            lcd.print("0");
+            lcd.setCursor(7, 2);
+            lcd.print(GestionTemps[0]);
+          }
+          lcd.setCursor(9, 2);
+          lcd.print(GestionTemps[1]);
+          lcd.setCursor(12, 2);
+          lcd.print(GestionTemps[2]);
+        }
+      Timersecpartie = currentTime;  
+      }  
+      if (GestionTemps[0] == 0 && GestionTemps[1] == 0 && GestionTemps[2] == 0){
+        NavModeExplosif++;  
+      } 
+      switch (NavCodeBombe) {
+        case 0:
+          //Saisie 1 chiffre code désactivation
+          if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btvalider() == 0){
+            lcd.setCursor(7, 3);
+            lcd.print(" "); 
+          }
+          else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btvalider() == 1){
+            if(CodeExplosif[4] == 99){
+              lcd.setCursor(7, 3);
+              lcd.print("_");    
+            }
+            else{
+              lcd.setCursor(7, 3);
+              lcd.print(CodeExplosif[4]);  
+            } 
+          }
+          else if (currentTime >= (Clignotementsaisie+1600)){
+            Clignotementsaisie = currentTime;      
+          } 
+          if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+            CodeExplosif[4] = saisieclavier(CodeExplosif[4]);
+            lcd.setCursor(7, 3);
+            lcd.print(CodeExplosif[4]);
+            NavCodeBombe++;    
+          }
+          NavCodeBombe = NavCodeBombe + btdroite() + btvalider();
+          break;
+        case 1:
+          //Saisie 2 chiffre code désactivation
+          if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0&& btgauche() == 0 && btvalider() == 0){
+            lcd.setCursor(8, 3);
+            lcd.print(" "); 
+          }
+          else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+            if(CodeExplosif[5] == 99){
+              lcd.setCursor(8, 3);
+              lcd.print("_");    
+            }
+            else{
+              lcd.setCursor(8, 3);
+              lcd.print(CodeExplosif[5]);  
+            } 
+          }
+          else if (currentTime >= (Clignotementsaisie+1600)){
+            Clignotementsaisie = currentTime;      
+          } 
+          if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+            CodeExplosif[5] = saisieclavier(CodeExplosif[5]);
+            lcd.setCursor(8, 3);
+            lcd.print(CodeExplosif[5]);
+            NavCodeBombe++;    
+          }
+          NavCodeBombe = NavCodeBombe + btdroite() + btgauche() + btvalider();
+          break;
+        case 2:
+          //Saisie 3 chiffre code désactivation
+          if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0&& btgauche() == 0 && btvalider() == 0){
+            lcd.setCursor(9, 3);
+            lcd.print(" "); 
+          }
+          else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+            if(CodeExplosif[6] == 99){
+              lcd.setCursor(9, 3);
+              lcd.print("_");    
+            }
+            else{
+              lcd.setCursor(9, 3);
+              lcd.print(CodeExplosif[6]);  
+            } 
+          }
+          else if (currentTime >= (Clignotementsaisie+1600)){
+            Clignotementsaisie = currentTime;      
+          } 
+          if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+            CodeExplosif[6] = saisieclavier(CodeExplosif[6]);
+            lcd.setCursor(9, 3);
+            lcd.print(CodeExplosif[6]);
+            NavCodeBombe++;    
+          }
+          NavCodeBombe = NavCodeBombe + btdroite() + btgauche() + btvalider();
+          break;
+        case 3:
+          //Saisie 4 chiffre code désactivation
+          if ((currentTime < (Clignotementsaisie+500)) && btdroite() == 0 && btgauche() == 0 && btvalider() == 0){
+            lcd.setCursor(10, 3);
+            lcd.print(" "); 
+          }
+          else if ((currentTime >= (Clignotementsaisie+500) && currentTime < (Clignotementsaisie+1600)) || btdroite() == 1 || btgauche() == -1 || btvalider() == 1){
+            if(CodeExplosif[7] == 99){
+              lcd.setCursor(10, 3);
+              lcd.print("_");    
+            }
+            else{
+              lcd.setCursor(10, 3);
+              lcd.print(CodeExplosif[7]);  
+            } 
+          }
+          else if (currentTime >= (Clignotementsaisie+1600)){
+            Clignotementsaisie = currentTime;      
+          } 
+          if(key == '0' || key == '1' || key == '2' || key == '3' || key == '4' || key == '5' || key == '6' || key == '7' || key == '8' || key == '9'){
+            CodeExplosif[7] = saisieclavier(CodeExplosif[7]);
+            lcd.setCursor(10, 3);
+            lcd.print(CodeExplosif[7]);
+            NavCodeBombe++;    
+          }
+          NavCodeBombe = NavCodeBombe + btdroite() + btgauche() + btvalider();
+          break;
+        case 4:
+          if(CodeExplosif[0] == CodeExplosif[4] && CodeExplosif[1] == CodeExplosif[5] && CodeExplosif[2] == CodeExplosif[6] && CodeExplosif[3] == CodeExplosif[7]){
+            NavModeExplosif = 40;  
+          }
+          else{
+            PourcentcumulPenalites = PourcentcumulPenalites + (PourcentPenalite[6]*10) + PourcentPenalite[7];
+            NavCodeBombe = 0;
+            digitalWrite(bipper , HIGH);
+            delay(50);
+            digitalWrite(bipper , LOW);
+            delay(50);
+            digitalWrite(bipper , HIGH);
+            delay(50);
+            digitalWrite(bipper , LOW);
+            CodeExplosif[4] = 99;
+            CodeExplosif[5] = 99;
+            CodeExplosif[6] = 99;
+            CodeExplosif[7] = 99;
+            lcd.setCursor(7, 3);
+            lcd.print("____");   
+          }
+          break;
+        default:
+          break;
+      }
+      if(((EtatFilcouper >= ValeurRfilsdesamorcage[0]-10 && EtatFilcouper <= ValeurRfilsdesamorcage[0]+10) && RandomNumSavNum == 0) || 
+         ((EtatFilcouper >= ValeurRfilsdesamorcage[1]-10 && EtatFilcouper <= ValeurRfilsdesamorcage[1]+10) && RandomNumSavNum == 1) || 
+         ((EtatFilcouper >= ValeurRfilsdesamorcage[2]-10 && EtatFilcouper <= ValeurRfilsdesamorcage[2]+10))){
+        if(RandomNumSav[0] != Randomnum && RandomNumSav[1] != Randomnum && RandomNumSav[2] != Randomnum && Randomnum < 3){
+          RandomNumSav[RandomNumSavNum] = Randomnum;  
+          RandomNumSavNum++;
+          if(Randomnum == 1){
+            PourcentcumulPenalites = PourcentcumulPenalites + (PourcentPenalite[0]*10) + PourcentPenalite[1];
+          }
+          else{
+            PourcentcumulPenalites = PourcentcumulPenalites + (PourcentPenalite[2]*10) + PourcentPenalite[3];
+          }  
+        }
+        else if(Randomnum == 3){
+          NavModeExplosif++;  
+        }
+        else if(Randomnum == 4){
+          NavModeExplosif = 40; 
+        }
+      }
+      if (PourcentcumulPenalites > 99){
+        NavModeExplosif++;  
+      }
+      else if(PourcentcumulPenalites >= 10){
+        lcd.setCursor(17, 3);
+        lcd.print(PourcentcumulPenalites);  
+      }
+      else{
+        lcd.setCursor(17, 3);
+        lcd.print("0");
+        lcd.setCursor(18, 3);
+        lcd.print(PourcentcumulPenalites);
+      }
+      break; 
+    case 39:
+      lcd.clear();
+      TimerBip[2] = currentTime; 
+      NavModeExplosif = 41;
+      break; 
+    case 40:
+      lcd.clear();
+      TimerBip[2] = currentTime; 
+      NavModeExplosif = 42;
+      break; 
+    case 41:
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 2);
+      lcd.print("    BOOMMMMMMMMM    ");
+      animation1();
+      bipper3();
+      digitalWrite(ledrouge , LOW);
+      break; 
+    case 42:
+      lcd.setCursor(0, 0);
+      lcd.print("  --  EXPLOSIVO  --  ");
+      lcd.setCursor(0, 2);
+      lcd.print("  Bombe Desactiver  ");
+      animation1();
+      bipper5();
+      digitalWrite(ledrouge , LOW);
+      break; 
+    default:
+      break;
+  }
+///////////////////////////////////////
+} 
